@@ -1,0 +1,746 @@
+---
+slug: "building-collapsible-tree-list-component-with-react-ts"
+title: "用 React 和 TS 编写可折叠树状列表组件"
+tags:
+  - "React"
+  - "TypeScript"
+  - "useImperativeHandle"
+  - "forwardRef"
+createdAt: 2026-07-22T09:12:34+08:00
+description: "本文使用 useRef、useImperativeHandle 和 forwardRef 实现可折叠展开、支持父级操作子级状态的树状列表组件。"
+cover: "/image/blog/building-collapsible-tree-list-component-with-react-ts.webp"
+bvid: "BV1Ne3F6gEps"
+---
+
+## 数据类型
+
+先来定义数据类型：
+
+```tsx
+type ItemType = {
+  title: string
+  items?: ItemType[]
+}
+```
+
+列表上的每一个项对应为一个对象类型：
+
+- `title` 是显示的文本
+- `items` 是子项，为 `ItemType` 的数组类型。若没有该属性，则代表没有子项。
+
+以递归嵌套的结构，定义了列表类型。
+
+## 图标组件
+
+准备四个图标：
+
+- `ChevronDown`：列表**展开**时显示的图标
+- `ChevronRight`：列表**折叠**时显示的图标
+- `CollapseAll`：**折叠所有**项按钮上显示的图标
+- `ExpandAll`：**展开所有**项按钮上显示的图标
+
+<CodeWithTabs>
+
+```tsx !!tabs ChevronDown
+// https://www.svgrepo.com/svg/521115/chevron-down
+export const ChevronDown = (props: React.ComponentProps<"svg">) => {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="800px"
+      height="800px"
+      viewBox="0 0 24 24"
+      {...props}
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M11.9999 13.9394L17.4696 8.46973L18.5303 9.53039L11.9999 16.0607L5.46961 9.53039L6.53027 8.46973L11.9999 13.9394Z"
+      />
+    </svg>
+  )
+}
+```
+
+```tsx !!tabs ChevronRight
+// https://www.svgrepo.com/svg/521109/chevron-right
+export const ChevronRight = (props: React.ComponentProps<"svg">) => {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="800px"
+      height="800px"
+      viewBox="0 0 24 24"
+      {...props}
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M13.9394 12.0001L8.46973 6.53039L9.53039 5.46973L16.0607 12.0001L9.53039 18.5304L8.46973 17.4697L13.9394 12.0001Z"
+      />
+    </svg>
+  )
+}
+```
+
+```tsx !!tabs CollapseAll
+// https://www.svgrepo.com/show/361085/collapse-all.svg
+export const CollapseAll = (props: React.ComponentProps<"svg">) => {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="800px"
+      height="800px"
+      viewBox="0 0 16 16"
+      {...props}
+    >
+      <path d="M9 9H4v1h5V9z" />
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M5 3l1-1h7l1 1v7l-1 1h-2v2l-1 1H3l-1-1V6l1-1h2V3zm1 2h4l1 1v4h2V3H6v2zm4 1H3v7h7V6z"
+      />
+    </svg>
+  )
+}
+```
+
+```tsx !!tabs ExpandAll
+// https://www.svgrepo.com/svg/361148/expand-all
+export const ExpandAll = (props: React.ComponentProps<"svg">) => {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="800px"
+      height="800px"
+      viewBox="0 0 16 16"
+      {...props}
+    >
+      <path d="M9 9H4v1h5V9z" />
+      <path d="M7 12V7H6v5h1z" />
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M5 3l1-1h7l1 1v7l-1 1h-2v2l-1 1H3l-1-1V6l1-1h2V3zm1 2h4l1 1v4h2V3H6v2zm4 1H3v7h7V6z"
+      />
+    </svg>
+  )
+}
+```
+
+</CodeWithTabs>
+
+以上图标组件均取自 [SVG Repo](https://www.svgrepo.com/)。
+
+## 用递归渲染列表
+
+由于在定义类型中用到了递归，在渲染时自然而然地也采用递归的方式渲染。
+
+### 组件
+
+新建文件 `tree-list.tsx`，我们需要在其中编写三个组件：`TreeList`、`Items` 和 `Item`。
+
+#### TreeList
+
+```tsx
+export function TreeList({
+  title,
+  items,
+}: {
+  title: string
+  items: ItemType[]
+}) {
+  return (
+    <div>
+      <div>{title}</div>
+      <Items items={items} />
+    </div>
+  )
+}
+```
+
+TreeList 组件接收 title 和 items 两个参数。items 交给 Items 组件渲染。
+
+#### Items
+
+```tsx
+const Items = ({ items }: { items: ItemType[] }) => {
+  return (
+    <ul className="tree-list">
+      {items.map((item, index) => {
+        return (
+          <li key={index}>
+            <Item item={item} />
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+```
+
+在 Items 组件中，给 ul 标签类名 `tree-list`，方便之后添加样式。并用 map 遍历 items 数组，每个元素对应返回一个 li 标签，每个单独的 item 再交给 Item 组件渲染。
+
+#### Item
+
+```tsx
+const Item = ({ item }: { item: ItemType }) => {
+  if (!item.items) {
+    return <span>{item.title}</span>
+  }
+
+  return (
+    <>
+      <div>{item.title}</div>
+      <Items items={item.items} />
+    </>
+  )
+}
+```
+
+在 Item 中，判断该项是否有子项：
+
+- 若无：则只返回标题
+- 若有：也返回标题，且并列渲染 Items 组件，传入 `item.items`
+
+### 样式
+
+我们需要将列表项之前的默认图标改成折线，来组成树状分支。
+
+先将所有元素的盒模型规则设置为 border-box：
+
+```css
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+```
+
+设置为 border-box 的元素的边框和内边距将向内扩展来获取空间，使得元素的实际宽高与 CSS 中 width 和 height 规定的保持一致。
+
+先消除 ul 元素上的各种边距和符号：
+
+```css
+ul.tree-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+```
+
+之后，给 li 元素添加内外边距和统一行高：
+
+```css
+ul.tree-list > li {
+  margin-left: 0.75rem;
+  padding-left: 0.75rem;
+  line-height: 1.5;
+}
+```
+
+由于这里多层级是通过嵌套渲染的，第一层的 li 标签中的边距会影响到其内的 ul 元素，给 li 添加边距后，自然会根据嵌套的深度呈现阶梯状。
+
+行高会根据自身字体大小调整，`1.5` 一般为 `24px`。
+
+折线我们用 li 元素的边框和它伪元素 `:before` 来实现。
+
+```css
+ul.tree-list > li {
+  /* 之前的代码 */
+
+  position: relative;
+  border-left: 1px solid lightgrey;
+}
+
+ul.tree-list > li::before {
+  content: " ";
+  width: 0.5rem;
+  height: 0.75rem;
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-bottom: 1px solid lightgrey;
+}
+```
+
+由于伪元素默认为行内元素，想让其宽度和高度起作用，需要改为**行内块级元素**或是**绝对定位**，这里我们用绝对定位。同时给 li 标签加上 `position: relative`，让其变成已定位元素，给伪元素建立定位上下文。
+
+同时为了让伪元素上的宽高起作用，将其中的内容设置为空字符串。为了让横线居中，高度为行高的一半 `0.75rem`，宽度可随 li 标签上的 padding-left 适当调整。
+
+`li` 标签上的 border-left 为竖线，`li::before` 上的 border-bottom 为横线。
+
+ul 中的最后一个 li 元素前显示的是 `├─`，由于之后没有其他项了，应该改成 `└─`：
+
+```css
+ul.tree-list > li:last-child {
+  border-left: 1px solid transparent;
+}
+
+ul.tree-list > li:last-child::before {
+  border-left: 1px solid lightgrey;
+  left: -1px;
+}
+```
+
+用 `:last-child` 选中最末尾的 li 标签，将边框颜色改为透明。并给最末尾 li 标签的 `::before` 伪元素添加边框，同时为了对齐，向左偏移 1 个像素。
+
+至此，可以得到一个用折线代表层级关系的列表。
+
+## 折叠
+
+我们通过自定义一个类似 details 元素的组件来实现折叠功能，并通过 forwardRef 和 useImperativeHandle 来控制整体的折叠和展开。
+
+### 自定义可折叠组件
+
+原生的 details 元素用法如下：
+
+```html
+<details open="true">
+  <summary>标题</summary>
+  <div>内容</div>
+  <div>另一个内容</div>
+</details>
+```
+
+子元素中除了 summary 外，其余的都会被当作可折叠内容来渲染。
+
+新建文件 `details.tsx`：
+
+```tsx
+import { Children, useState, type ComponentProps } from "react"
+import { ChevronDown, ChevronRight } from "./icons"
+
+export const Details = (props: ComponentProps<"details">) => {
+  const [isOpen, setIsOpen] = useState(props.open ?? true)
+
+  const toggle = () => setIsOpen((prevIsOpen) => !prevIsOpen)
+
+  const childArray = Children.toArray(props.children)
+  const [titleElement, ...contentElements] = childArray
+
+  return (
+    <details open={isOpen}>
+      <summary
+        onClick={(event) => {
+          event.preventDefault()
+          toggle()
+        }}
+      >
+        {isOpen ? <ChevronDown /> : <ChevronRight />}
+        {titleElement}
+      </summary>
+
+      {contentElements}
+    </details>
+  )
+}
+```
+
+仿照原生 details 的行为，将传入 Details 组件的第一个元素作为标题，其余的作为内容。
+
+使用 useState 来控制内容元素的展开和折叠，用空值合并运算符将其默认为**展开**状态。根据 isOpen 的值，在 summary 中显示对应的图标：
+
+- 展开时显示 ChevronDown 下箭头
+- 折叠时显示 ChevronRight 右箭头
+
+在 summary 的onClick 事件上先阻止默认行为，再调用 toggle 方法，防止在点击后，默认行为和toggle 都被触发，导致图标和内容显示不匹配。
+
+同时给 summary 加上 flex 布局，这会隐藏其默认的实心三角形的图标，并规定 svg 标签的尺寸：
+
+```css
+summary {
+  display: flex;
+  align-items: center;
+}
+
+svg {
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 2px;
+}
+```
+
+之后，给 TreeList 添加 Details 组件：
+
+```tsx handlers="mark"
+// !mark
+import { Details } from "./details"
+
+export function TreeList(/* */) {
+  // !mark(2,5)
+  return (
+    <Details>
+      <div>{title}</div>
+      <Items items={items} />
+    </Details>
+  )
+}
+```
+
+Item 组件中也需要添加：
+
+```tsx handlers="mark"
+const Item = ({ item }: { item: ItemType }) => {
+  if (!item.items) {
+    return <span>{item.title}</span>
+  }
+
+  // !mark(2,5)
+  return (
+    <Details>
+      <div>{item.title}</div>
+      <Items items={item.items} />
+    </Details>
+  )
+}
+```
+
+至此，所有的带有子项的 li 标签均可通过其中的 Details 组件展开和折叠子项了。
+
+### 展开和折叠所有项
+
+在 React 中，一般的数据流向是：在父组件中定义函数，传入到子组件中，即**子组件调用父组件**中的函数；而折叠或展开所有项的逻辑是，通过点击父组件中的元素，控制所有后代元素中的 Details 组件的状态，即**父组件调用子组件**中的函数。
+
+我们可以通过 `forwardRef` 和 `useImperativeHandle` 的组合来实现。
+
+#### Details 上的 forwardRef
+
+给 Details 组件套上 forwardRef，并接收父组件中传来的 ref：
+
+```tsx handlers="mark"
+// !mark(5,6)
+import {
+  Children,
+  ComponentProps,
+  useState,
+  forwardRef,
+  useImperativeHandle,
+} from "react"
+import { ChevronDown, ChevronRight } from "./icons"
+
+// !mark[/forwardRef/] green
+export const Details = forwardRef(
+  // !mark[/ref/]
+  (props: ComponentProps<"details">, ref) => {
+    const [isOpen, setIsOpen] = useState(props.open ?? true)
+
+    // !mark(1:2,4)
+    const open = () => setIsOpen(true)
+    const close = () => setIsOpen(false)
+
+    useImperativeHandle(ref, () => ({ open, close }), [])
+
+    const toggle = () => setIsOpen((prevIsOpen) => !prevIsOpen)
+
+    const childArray = Children.toArray(props.children)
+    const [titleElement, ...contentElements] = childArray
+
+    return (
+      <details open={isOpen}>
+        <summary
+          onClick={(event) => {
+            event.preventDefault()
+            toggle()
+          }}
+        >
+          {isOpen ? <ChevronDown /> : <ChevronRight />}
+          {titleElement}
+        </summary>
+
+        {contentElements}
+      </details>
+    )
+  },
+)
+```
+
+在 Details 中，定义两个方法，open 和 close，用于展开和折叠内容，并把这两个方法作为返回值，让 useImperativeHandle 的第二个函数参数返回。这样就可以在父组件中，通过向 Details 中传入的 ref 来调用 open 和 close 函数了。
+
+#### Item 上的 forwardRef
+
+在 Item 中，定义 ref 并传给 Details 组件：
+
+```tsx handlers="mark"
+// !mark[/forwardRef/]
+const Item = forwardRef(({ item }: { item: ItemType }, ref) => {
+  // !mark(1:2)
+  const detailsRef = useRef<{ open: () => void; close: () => void }>(null)
+  const itemsRef = useRef<{ openAll: () => void; closeAll: () => void }>(null)
+
+  const openAll = () => {
+    detailsRef.current?.open()
+    itemsRef.current?.openAll()
+  }
+  const closeAll = () => {
+    detailsRef.current?.close()
+    itemsRef.current?.closeAll()
+  }
+
+  // !mark
+  useImperativeHandle(ref, () => ({ openAll, closeAll }), [])
+
+  if (!item.items) {
+    return <span>{item.title}</span>
+  }
+
+  return (
+    // !mark[/ref=\{detailsRef\}/]
+    <Details ref={detailsRef}>
+      <div>{item.title}</div>
+      {/* !mark[/ref=\{itemsRef\}/] */}
+      <Items items={item.items} ref={itemsRef} />
+    </Details>
+  )
+})
+```
+
+这里定义了两个 ref：
+
+- 一个操作自身的 Details 组件
+- 另一个传给子项的 Items 组件，继续向下操作
+
+Item 组件也用 forwardRef 来接收其父组件 Items 传来的 ref。同时，定义用于展开和折叠所有子项中的 Details 组件的操作函数 openAll 和 closeAll，通过 useImperativeHandle 提供给父组件使用。
+
+#### Items 上的 forwardRef
+
+用 createRef 动态地创建和 items 数组相同长度的总 ref，并在渲染 Item 组件时，通过 index 传入对应的 ref：
+
+```tsx handlers="mark"
+// !mark[/forwardRef/] green
+const Items = forwardRef(({ items }: { items: ItemType[] }, ref) => {
+  // !mark(1:5)
+  const refs = useRef(
+    items.map(() => {
+      return createRef<{ openAll: () => void; closeAll: () => void }>()
+    }),
+  )
+
+  // !mark(1:12)
+  useImperativeHandle(
+    ref,
+    () => ({
+      openAll: () => {
+        refs.current.forEach((ref) => ref.current?.openAll())
+      },
+      closeAll: () => {
+        refs.current.forEach((ref) => ref.current?.closeAll())
+      },
+    }),
+    [],
+  )
+
+  return (
+    <ul className="tree-list">
+      {items.map((item, index) => {
+        return (
+          <li key={index}>
+            {/* !mark[/ref=\{refs.current\[index\]\}/] */}
+            <Item item={item} ref={refs.current[index]} />
+          </li>
+        )
+      })}
+    </ul>
+  )
+})
+```
+
+Items 组件也要用 forwardRef 包起来，在接收从父组件传来的 ref 参数的同时，在 useImperativeHandle 中，向父组件提供展开和折叠所有子 Item 组件中的 Details 组件的功能函数 openAll 和 closeAll。
+
+这样一来，Items 组件的父组件，也就是 TreeList 或 Item 组件，就能够通过 ref 来控制 Items 组件的多个子 Item 中的 Details 组件的状态了，而 Item 组件中又定义了 openAll 和 closeAll 用于控制子 Details 和子 Items 组件中的 Details 组件的状态。
+
+这样一来，有一处 openAll 或者 closeAll 被触发，就会顺着 ref 链向下一路执行，展开或折叠所有的子项。
+
+#### TreeList 上的 ref
+
+给最顶层的 TreeList 也添加 ref 和操作函数：
+
+```tsx handlers="mark"
+export function TreeList(/*  */) {
+  // !mark(1:2)
+  const detailsRef = useRef<{ open: () => void; close: () => void }>(null)
+  const itemsRef = useRef<{ openAll: () => void; closeAll: () => void }>(null)
+
+  // !mark(1:8)
+  const openAll = () => {
+    detailsRef.current?.open()
+    itemsRef.current?.openAll()
+  }
+  const closeAll = () => {
+    detailsRef.current?.close()
+    itemsRef.current?.closeAll()
+  }
+
+  // !mark(2,4)
+  return (
+    <Details ref={detailsRef}>
+      <div>{data.title}</div>
+      <Items items={items} ref={itemsRef} />
+    </Details>
+  )
+}
+```
+
+## 添加图标
+
+最后，给 openAll 和 closeAll 添加对应的按钮和图标。
+
+添加 `.details-header` 用于给 Details 组件中的标题和图标对齐：
+
+```css
+.details-header {
+  display: flex;
+  align-items: center;
+}
+```
+
+### Item 上的图标
+
+```tsx handlers="mark"
+// !mark
+import { CollapseAll, ExpandAll } from "./icons"
+
+const Item = forwardRef(({ item }: { item: ItemType }, ref) => {
+  // ...
+
+  // !mark(3:19)
+  return (
+    <Details ref={detailsRef}>
+      <div className="details-header">
+        <div>{item.title}</div>
+        <ExpandAll
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            openAll()
+          }}
+        />
+        <CollapseAll
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            closeAll()
+          }}
+        />
+      </div>
+      <Items items={item.items} ref={itemsRef} />
+    </Details>
+  )
+})
+```
+
+在点击事件上阻止默认行为和停止冒泡，防止事件传播到 summary 元素上使图标和状态不匹配。
+
+### TreeList 上的图标
+
+```tsx handlers="mark"
+export function TreeList() {
+  // ...
+
+  // !mark(3:19)
+  return (
+    <Details ref={detailsRef}>
+      <div className="details-header">
+        <div>{title}</div>
+        <ExpandAll
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            openAll()
+          }}
+        />
+        <CollapseAll
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            closeAll()
+          }}
+        />
+      </div>
+      <Items items={items} ref={itemsRef} />
+    </Details>
+  )
+}
+```
+
+## 稍加完善
+
+在此处理标题过长或宽度过窄，导致标题换行后，展开折叠图标前缺少部分折线的问题。
+
+将 `summary` 和 `.details-header` 的对齐方式改成顶部对齐。另外，svg 为 flex 布局项，为其添加 `flex-shrink: 0` 保持宽度。
+
+```css
+summary {
+  align-items: flex-start;
+}
+svg {
+  flex-shrink: 0;
+}
+.details-header {
+  align-items: flex-start;
+  position: relative;
+}
+```
+
+我们通过给 `.details-header::before` 添加边框，来代替缺少的折线：
+
+```css
+details > summary > div.details-header::before {
+  content: " ";
+  height: calc(100% - 1.5rem);
+  position: absolute;
+  top: 1.5rem;
+  left: -0.75rem;
+  border-left: 1px solid purple;
+}
+```
+
+高度为自身高度减去图标的高度，同时在定位上用 `top: 1.5rem` 给图标留出空间，不会挡住图标。
+
+最后在 details 关闭时，不显示该折线：
+
+```css
+details:not([open]) > summary > div.details-header::before {
+  border-color: transparent;
+}
+```
+
+## 代码沙盒
+
+<CodeSandbox
+  template="react-ts"
+  title="可折叠树状列表"
+  folder="/code-sandbox/blog/6-tree-list-in-react-ts"
+  files={{
+    "/App.tsx": true,
+    "/data.ts": true,
+    "/styles.css": true,
+    "/components/details.tsx": true,
+    "/components/icons.tsx": true,
+    "/components/tree-list.tsx": true,
+  }}
+  customSetup={{
+    dependencies: {
+      react: "19.1.0",
+      "react-dom": "19.1.0",
+    },
+    devDependencies: {
+      "@types/react": "^19.1.0",
+      "@types/react-dom": "^19.1.0",
+    },
+  }}
+  options={{
+    activeFile: "/components/tree-list.tsx",
+    visibleFiles: [
+      "/App.tsx",
+      "/data.ts",
+      "/styles.css",
+      "/components/details.tsx",
+      "/components/icons.tsx",
+      "/components/tree-list.tsx",
+    ],
+  }}
+  previewHeight="640px"
+  collapseToLine={32}
+  showExpandButton={false}
+/>

@@ -1,0 +1,908 @@
+---
+slug: "building-multi-select-component-with-shadcn-in-nextjs"
+title: "用 NextJS 和 shadcn 实现多选组件"
+tags:
+  - "React"
+  - "@shadcn/ui"
+createdAt: 2026-08-08T08:00:00+08:00
+description: "本文介绍了如何使用 React 和 @shadcn/ui 中的 InputGroup 组件，实现一个可复用的 Multi-Select 多选组件，并讨论了 useCallback 优化的局限性，以及如何在不添加状态作为依赖项的场景下，配合 useRef 和 useEffect 进行优化，和 React 19.2 中的 useEffectEvent 的使用方法。"
+cover: "/image/blog/building-multi-select-component-with-shadcn-in-nextjs.webp"
+bvid: "BV1DHu96FE8G"
+---
+
+参数如下：
+
+- `options: string[]`：所有的可选项
+- `selectedOptions: string[]`：组件外部的状态
+- `onSelectOption:`：添加选项的回调函数
+
+```tsx showCopyButton
+export const MultiSelect = ({
+  options,
+  selectedOptions,
+  onSelectOption,
+}: {
+  options: string[]
+  selectedOptions: string[]
+  onSelectOption: (option: string) => void
+}) => {}
+```
+
+在组件之外定义状态：
+
+```tsx showCopyButton
+const App = () => {
+  const [selectedOptions, setSelectedOptions] = useState<string[]>([])
+
+  const handleSelectOption = React.useCallback((option: string) => {
+    setSelectedOptions((prevSelectedOptions) => {
+      if (!prevSelectedOptions.includes(option)) {
+        return [...prevSelectedOptions, option]
+      } else {
+        return prevSelectedOptions.filter(
+          (selectedOption) => selectedOption !== option,
+        )
+      }
+    })
+  }, [])
+
+  return (
+    <MultiSelect
+      options={options}
+      selectedOptions={selectedOptions}
+      onSelectOption={handleSelectOption}
+    />
+  )
+}
+```
+
+传入 onSelectOption 的函数 handleSelectOption 需要使用 useCallback 保存引用，以便于在 MultiSelect 中进行优化。
+
+## 组件结构
+
+组件分为两大部分：
+
+1. 输入框
+2. 选项列表
+
+```tsx
+const MultiSelect = () => {
+  return (
+    <div>
+      <InputGroup>{/* 输入框 */}</InputGroup>
+      <ul>{/* 选项列表 */}</ul>
+    </div>
+  )
+}
+```
+
+### 输入框
+
+输入框又分为三小部分：
+
+1. 已选择项按钮
+2. 输入框本体
+3. 打开按钮
+
+#### 已选择项按钮
+
+在输入框最左侧通过 InputGroupAddon 显示已选择过的选项的按钮。
+
+先确保 selectedOptions 的长度大于 0，在渲染 InputGroupAddon。之后遍历渲染 selectedOptions，每个 selectedOption 返回一个 InputGroupBuuton 组件。
+
+- key 直接用 selectedOption 字符串
+- InputGroupBuuton 的 variant 默认是 ghost，改为 default
+
+```tsx
+<InputGroup>
+  {selectedOptions.length > 0 ? (
+    <InputGroupAddon>
+      {selectedOptions.map((selectedOption) => {
+        return (
+          <InputGroupBuuton key={selectedOption} variant="default">
+            {selectedOption}
+            <XIcon />
+          </InputGroupBuuton>
+        )
+      })}
+    </InputGroupAddon>
+  ) : null}
+</InputGroup>
+```
+
+然后是 InputGroupAddon 的样式：
+
+- InputGroupAddon 默认为 flex 布局，其子元素的排列方式为 justify-center，为了防止超出左侧范围，改为 `justify-start`
+- 最大宽度 `max-w-7/12`，给输入框留出空间
+- 超出部分隐藏，并显示滚动条 `overflow-auto`
+- 隐藏滚动条 `no-scrollbar`
+- 右侧内边距 `pr-1`
+
+```tsx
+<InputGroupAddon className="no-scrollbar max-w-7/12 justify-start overflow-auto pr-1">
+  {/* */}
+</InputGroupAddon>
+```
+
+#### 输入框本体
+
+```tsx
+<InputGroup>
+  {/* InputGroupAddon */}
+
+  <InputGroupInput />
+</InputGroup>
+```
+
+#### 打开按钮
+
+第三小部分是最右侧的按钮，也通过 InputGroupAddon 和 InputGroupButton 呈现：
+
+```tsx
+<InputGroup>
+  {/* InputGroupAddon */}
+
+  {/* InputGroupInput*/}
+
+  <InputGroupAddon align="inline-end">
+    <InputGroupButton size="icon-xs" onClick={toggleIsOpen}>
+      {isOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
+    </InputGroupButton>
+  </InputGroupAddon>
+</InputGroup>
+```
+
+InputGroupAddon 的 align 默认为 inline-start，排在最左侧，改为 inline-end，使其排在最右侧。
+
+通过 isOpen 状态 显示不同图标：
+
+```tsx showCopyButton
+const [isOpen, setIsOpen] = React.useState(false)
+const toggleIsOpen = () => setIsOpen((_) => !_)
+```
+
+以上为第一大部分的输入框。
+
+### 选项列表
+
+使用列表元素 ul 渲染参数 options：
+
+```tsx
+<ul>
+  {options.map((option) => {
+    return <li key={option}>{option}</li>
+  })}
+</ul>
+```
+
+列表样式：
+
+```tsx
+<div className="relative">
+  {/* InputGroup */}
+
+  <ul className="bg-background no-scrollbar absolute mt-2.5 max-h-48 w-full overflow-auto rounded-lg border shadow-sm"></ul>
+</div>
+```
+
+- ul 背景默认为透明色，添加 `bg-background`
+- 边框 `border`
+- 圆角 `rounded-lg`
+- 它是一个浮动窗口，还应绝对定位 `absolute`，
+- 保持全宽 `w-full`
+  - 再给容器 div 加上 `relative`，保持和容器一样的宽度
+- 限制最大高度 `max-h-48`
+- 超出的部分显示滚动条 `overflow-auto`
+- 隐藏滚动条 `no-scrollbar`
+- 上外边距 `mt-2.5`
+- 添加阴影，有层次感 `shadow-sm`
+
+列表项的样式：
+
+- 高度 `h-8`，使列表最多显示 6 个选项
+- `flex` 布局
+- 水平居中对齐 `items-center`
+- `px-2.5`
+
+## 功能
+
+### 打开关闭
+
+只在 isOpen 为 true 时，打开选项列表：
+
+```ts
+<ul
+  className={cn(
+    "...",
+    isOpen ? "block" : "hidden",
+  )}
+>
+```
+
+使用 `cn` 函数，在 isOpen：
+
+- 为 true 时，添加 `block`，显示列表选项
+- 为 false 时，添加 `hidden`，隐藏列表选项
+
+我们还希望在输入框被聚焦时显示列表项：
+
+```tsx
+<InputGroupInput onFocus={() => setIsOpen(true)} />
+```
+
+使用 onFocus 添加打开选项列表的逻辑。
+
+打开之后，再点击组件外部，需要关闭列表项。
+
+给容器 div 创建 ref：
+
+```tsx
+const containerRef = React.useRef<HTMLDivElement>(null)
+
+<div className="relative" ref={containerRef}>
+```
+
+在 useEffect 中，判断事件发生的位置，是否在组件内部：
+
+```tsx handlers="mark"
+useEffect(() => {
+  const containerNode = containerRef.current
+  if (!containerNode) return
+
+  const handleCloseOptions = (event: MouseEvent) => {
+    // !mark
+    if (!containerNode.contains(event.target as Node)) {
+      setIsOpen(false)
+    }
+  }
+
+  document.addEventListener("click", handleCloseOptions)
+
+  return () => {
+    document.removeEventListener("click", handleCloseOptions)
+  }
+}, [])
+```
+
+如果不在容器 div 内部，就关闭选项列表。
+
+### 浏览选项
+
+如果鼠标悬浮在选项上，需要加上高光，同样用键盘浏览选项的时候也是如此，为了让这两者兼容，我们用一个状态来记录当前高光的，选项的下标：
+
+```tsx
+const [hoveredIndex, setHoveredIndex] = React.useState<number | null>(null)
+```
+
+初始值为 null，也就是没有选项处于高光状态；如果鼠标移动到了选项上，再把它设置为数字，所以类型是 `number | null`。
+
+#### 鼠标事件及选项高光
+
+用于处理鼠标进入选项的函数 mouseEnterOption：
+
+```tsx handlers="mark"
+const mouseEnterOption = React.useCallback(
+  (event: React.MouseEvent<HTMLLIElement>) => {
+    // !mark
+    const rawIndex = event.currentTarget.dataset["index"]
+    if (!rawIndex) return
+    const index = parseInt(rawIndex)
+    setHoveredIndex(index)
+  },
+  [],
+)
+```
+
+鼠标移入选项中时，从事件 event 中通过 dataset 读取选项下标。需要给列表项元素加上 data-index 属性。
+
+```tsx handlers="mark"
+<li
+  key={option}
+  className={cn("flex h-8 items-center px-2.5")}
+  // !mark
+  data-index={index}
+  onMouseEnter={mouseEnterOption}
+>
+  {option}
+</li>
+```
+
+在遍历列表项，每个选项 return 之前，计算出是否处于高光状态 `isHovered`：
+
+```tsx handlers="mark"
+<ul>
+  {options.map((option, index) => {
+    // !mark
+    const isHovered = index === hoveredIndex
+    return (
+      <li
+        key={option}
+        className={cn(
+          "flex h-8 items-center px-2.5",
+          // !mark
+          isHovered ? "bg-accent" : "",
+        )}
+        data-index={index}
+        onMouseEnter={mouseEnterOption}
+      >
+        {option}
+      </li>
+    )
+  })}
+</ul>
+```
+
+并通过 cn 函数，在 isHovered 时，添加高光背景 `bg-accent`。
+
+鼠标移出选项列表后，应该取消选项的高光：
+
+```tsx handlers="mark"
+<ul
+  ref={optionsRef}
+  className={/* */}
+  // !mark
+  onMouseLeave={() => setHoveredIndex(null)}
+>
+  {/* */}
+</ul>
+```
+
+#### 通过键盘浏览选项
+
+然后是通过键盘浏览时的高光，给输入框添加 onKeyDown 事件：
+
+```tsx
+const handleKeyDown = (event: React.KeyboardEvent) => {}
+```
+
+```tsx handlers="mark"
+<InputGroupInput
+  onFocus={() => setIsOpen(true)}
+  // !mark
+  onKeyDown={handleKeyDown}
+/>
+```
+
+输入框在聚焦的状态下，每按下一个键，都会触发 handleKeyDown。
+
+给选项列表定义 ref：
+
+```tsx
+const optionsRef = React.useRef<HTMLUListElement>(null)
+
+<ul
+  ref={optionsRef}
+  className={/* */}
+  onMouseLeave={() => setHoveredIndex(null)}
+>
+
+```
+
+按键 event.code 数组：
+
+```tsx
+const ARROW_UP_KEYS = ["ArrowUp", "Numpad8"]
+const ARROW_DOWN_KEYS = ["ArrowDown", "Numpad2"]
+const ARROW_KEYS = [...ARROW_UP_KEYS, ...ARROW_DOWN_KEYS]
+const CONFIRM_KEYS = ["Enter", "NumpadEnter", "Space"]
+const CLOSE_KEYS = ["Escape"]
+```
+
+这里提前定义好了一些按键的 code 的值。
+
+在 handleKeyDown 中，先获取列表元素：
+
+```tsx
+const handleKeyDown = () => {
+  const optionsNode = optionsRef.current
+  if (!optionsNode) return
+
+  if (ARROW_KEYS.includes(event.code)) {
+    // arrow keys
+  } else if (CONFIRM_KEYS.includes(event.code)) {
+    // confirm keys
+  } else if (CLOSE_KEYS.includes(event.code)) {
+    // close keys
+  }
+}
+```
+
+之后通过判断是否为对应按键的数组，分成 3 个分支。
+
+如果是上下箭头的情况：
+
+先阻止默认行为。再判断，当前是否有选项处于高光状态：
+
+- 若无，则
+  - 按上键，高光最后一项
+  - 按下键，高光第一项
+
+```tsx
+if (ARROW_KEYS.includes(event.code)) {
+  event.preventDefault()
+
+  if (hoveredIndex === null) {
+    if (ARROW_UP_KEYS.includes(event.code)) {
+      setHoveredIndex(options.length - 1)
+      optionsNode.scrollTop = optionsNode.scrollHeight
+    } else {
+      setHoveredIndex(0)
+      optionsNode.scrollTop = 0
+    }
+  }
+}
+```
+
+同时还要处理滚动条，通过将 optionsNode.scrollTop 设置为 optionsNode.scrollHeight 或 0 将滚动条滚动到底部或顶部。
+
+- 若有，则
+  - 按上键，高光上一项
+  - 按下键，高光下一项
+
+```tsx
+if (ARROW_KEYS.includes(event.code)) {
+  event.preventDefault()
+
+  if (hoveredIndex === null) {
+    // ...
+  } else {
+    let nextHoveredIndex = hoveredIndex
+
+    if (ARROW_UP_KEYS.includes(event.code)) {
+      nextHoveredIndex -= 1
+    } else if (ARROW_DOWN_KEYS.includes(event.code)) {
+      nextHoveredIndex += 1
+    }
+
+    if (nextHoveredIndex < 0) nextHoveredIndex = options.length - 1
+    if (nextHoveredIndex > filteredOptions.length - 1) nextHoveredIndex = 0
+
+    setHoveredIndex(nextHoveredIndex)
+
+    const nextHoveredOption = optionsNode.querySelector(
+      `li:nth-of-type(${nextHoveredIndex + 1})`,
+    )
+    if (!nextHoveredOption) return
+
+    nextHoveredOption.scrollIntoView({ block: "nearest" })
+  }
+}
+```
+
+处理滚动条时，通过 querySelector 获取选项列表下的列表项元素，用 `li:nth-of-type` 定位到下一个高光项的列表项元素。`nth-of-type` 从 1 开始计数，使用 nextHoveredIndex 应加上 1。
+
+找到对应的列表项元素后，通过 scrollIntoView 将元素显示到视窗中。
+
+参数 block 还可以是 start、center 或者 end，用于把元素滚动到顶部、中部或底部；nearest 是只有元素需要滚动的时候，才滚动到离顶部或者底部最近的地方，能不滚动就不滚动。
+
+### 选择选项
+
+#### 鼠标点击选择
+
+也通过 `data-*` 来传递选项字符串的值：
+
+```tsx handlers="mark"
+<li
+  key={option}
+  className={/* */}
+  data-index={index}
+  // !mark(1:2)
+  data-label={option}
+  onClick={selectOption}
+  onMouseEnter={mouseEnterOption}
+>
+  {option}
+</li>
+```
+
+同样还有 InputGroup 左侧的按钮上：
+
+```tsx handlers="mark"
+<InputGroupButton
+  key={selectedOption}
+  variant="default"
+  // !mark(1:2)
+  data-label={selectedOption}
+  onClick={selectOption}
+>
+  {selectedOption}
+  <XIcon />
+</InputGroupButton>
+```
+
+定义 selectOption 用于处理选择选项：
+
+```tsx
+const handleSelectTag = React.useCallback(
+  (event: React.MouseEvent<HTMLLIElement | HTMLButtonElement>) => {
+    const label = event.currentTarget.dataset["label"]
+    if (!label) return
+    onSelectOption(label)
+    setIsOpen(false)
+    setSearch("")
+  },
+  [],
+)
+```
+
+由于点击列表项元素和点击按钮都能触发，所以 event 的类型是 MouseEvent `<HTMLLIElement | HTMLButtonElement>`。
+
+再给已选择的列表项加上样式：
+
+```tsx handlers="mark"
+<ul>
+  {options.map((option, index) => {
+    const isHovered = index === hoveredIndex
+    // !mark
+    const isSelected = selectedOptions.includes(option)
+    return (
+      <li
+        key={option}
+        className={cn(
+          "flex h-8 items-center px-2.5",
+          isHovered ? "bg-accent" : "",
+          // !mark(1:2)
+          isSelected ? "bg-primary text-primary-foreground" : "",
+          isHovered && isSelected ? "bg-primary/80" : "",
+        )}
+        data-index={index}
+        data-label={option}
+        onClick={selectOption}
+        onMouseEnter={mouseEnterOption}
+      >
+        {option}
+      </li>
+    )
+  })}
+</ul>
+```
+
+如果是已选择的状态，则加上 `bg-primary` 和 `text-primary-foreground`；如果是即选择、有高光的状态，则加上 `bg-primary/80`。
+
+#### 通过键盘选择选项
+
+然后是通过键盘选择选项的功能。同样，先阻止默认行为：
+
+```tsx
+if (ARROW_KEYS.includes(event.code)) {
+  //
+} else if (CONFIRM_KEYS.includes(event.code)) {
+  event.preventDefault()
+  if (!isOpen) {
+    setIsOpen(true)
+    return
+  }
+  if (hoveredIndex === null) return
+  const label = filteredOptions.at(hoveredIndex)
+  if (!label) return
+  onSelectOption(label)
+  setIsOpen(false)
+} else if (CLOSE_KEYS.includes(event.code)) {
+  //
+}
+```
+
+之后，判断状态：
+
+- 如果是关闭状态，就打开并返回。
+- 如果是打开状态：
+  - 但没有处于高光的选项，也返回
+
+最后用 onSelectOption 选择选项，并关闭选项列表。
+
+### 关闭选项列表
+
+最后 handleKeyDown 中还剩下关闭列表的分支：
+
+```tsx
+if (ARROW_KEYS.includes(event.code)) {
+  //
+} else if (CONFIRM_KEYS.includes(event.code)) {
+  //
+} else if (CLOSE_KEYS.includes(event.code)) {
+  setIsOpen(false)
+}
+```
+
+直接关闭列表即可。
+
+### 选项筛选
+
+创建状态 search 记录输入的关键字：
+
+```tsx
+const [search, setSearch] = React.useState("")
+
+<InputGroupInput
+  value={search}
+  onChange={(event) => setSearch(event.target.value)}
+  onFocus={() => setIsOpen(true)}
+  onKeyDown={handleKeyDown}
+/>
+```
+
+现在每输入一个字符，都会重新渲染组件，要做筛选的话，需要优化一下。
+
+再写一个 deferredSearch，用 useDeferredValue 来优化频繁变化的 search：
+
+```tsx handlers="mark"
+const [search, setSearch] = React.useState("")
+// !mark
+const deferredSearch = React.useDeferredValue(search)
+```
+
+当然，这里也可以使用 useDebounce 来优化。
+
+用 useDebounce 的话，无论设备的性能，都需要等待几百毫秒的延迟才会更新。
+
+而 useDeferredValue 会保证在性能好的设备上**瞬间**更新 UI，几乎感觉不到延迟；在老旧的设备上，再优先保证输入框不卡顿，然后自动延迟列表的渲染。
+
+之后再计算 filteredOptions：
+
+```tsx
+const filteredOptions = options.filter((option) => {
+  return option.toLowerCase().includes(deferredSearch.toLowerCase())
+})
+```
+
+对每个 option，先转化成小写再进行检查；同样，deferredSearch 也转化为小写。
+
+之后渲染选项列表时，应该将 options 替换为 filteredOptions，并提前判断长度不为 0 再渲染：
+
+```tsx handlers="mark"
+// !mark(2:7)
+<ul>
+  {filteredOptions.length === 0 ? (
+    <Empty>
+      <EmptyHeader>
+        <EmptyDescription>No matched options...</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  ) : (
+    // !mark[/filteredOptions/]
+    filteredOptions.map((option, index) => {
+      //
+      return <li>{option}</li>
+    })
+  )}
+</ul>
+```
+
+还有 handleKeyDown 中设计到 options.length 的地方，总共 4 处：
+
+```tsx handlers="mark diff" showCopyButton
+const handleKeyDown = () => {
+  const optionsNode = optionsRef.current
+  if (!optionsNode) return
+
+  if (ARROW_KEYS.includes(event.code)) {
+    event.preventDefault()
+    if (hoveredIndex === null) {
+      if (ARROW_UP_KEYS.includes(event.code)) {
+        // !diff -
+        setHoveredIndex(options.length - 1)
+        // !diff +
+        setHoveredIndex(filteredOptions.length - 1)
+        optionsNode.scrollTop = optionsNode.scrollHeight
+      } else {
+        setHoveredIndex(0)
+        optionsNode.scrollTop = 0
+      }
+    } else {
+      let nextHoveredIndex = hoveredIndex
+      if (ARROW_UP_KEYS.includes(event.code)) {
+        nextHoveredIndex -= 1
+      } else {
+        nextHoveredIndex += 1
+      }
+      // !diff -
+      if (nextHoveredIndex < 0) nextHoveredIndex = options.length - 1
+      // !diff +
+      if (nextHoveredIndex < 0) nextHoveredIndex = filteredOptions.length - 1
+      // !diff -
+      if (nextHoveredIndex > options.length - 1) nextHoveredIndex = 0
+      // !diff +
+      if (nextHoveredIndex > filteredOptions.length - 1) nextHoveredIndex = 0
+      setHoveredIndex(nextHoveredIndex)
+      const nextHoveredOption = optionsNode.querySelector(
+        `li:nth-of-type(${nextHoveredIndex + 1})`,
+      )
+      if (!nextHoveredOption) return
+      nextHoveredOption.scrollIntoView({ block: "nearest" })
+    }
+  } else if (CONFIRM_KEYS.includes(event.code)) {
+    event.preventDefault()
+    if (!isOpen) {
+      setIsOpen(true)
+      return
+    }
+    if (hoveredIndex === null) return
+    // !diff -
+    const label = options.at(hoveredIndex)
+    // !diff +
+    const label = filteredOptions.at(hoveredIndex)
+    if (!label) return
+    onSelectOption(label)
+    setIsOpen(false)
+  } else if (CLOSE_KEYS.includes(event.code)) {
+    setIsOpen(false)
+  }
+}
+```
+
+## 优化
+
+目前为止，功能基本都完善了。然后来看一下，有哪些地方能优化。
+
+函数 handleKeyDown 没有加上 useCallback，先来讨论一下如果加上的话，需要哪些依赖项：
+
+- 首先是 `filteredOptions`，只要一筛选，它的长度就会变，就需要和最新周期中的保持同步
+- 然后是 `hoveredIndex`，改变高光项也会触发重新渲染，也需要和最新周期中的保持一致
+- 还有 `isOpen`，打开关闭列表项也会重新渲染
+- 最后是从父组件中接收的 `onSelectOption`，但它用了 useCallback，它的引用肯定是不会变的，但也需要加上
+
+重点需要观察的是 `isOpen`、`filteredOptions` 和 `hoveredIndex` 这三个。
+
+理论上用 useCallback 进行优化，也是有代价的。代价就是 React 内部，对新旧周期中的这些值，进行比较，所消耗的性能。
+
+每次更新，这三个值中的至少一个都会变化，肯定会触发 useCallback 返回新的引用。不加 useCallback 的话，每次更新也是返回新的引用，但省去了 react 内部进行比较所消耗的性能。
+
+这样看来，不加性能才更优。
+
+### ref + effect 优化
+
+但这里我们还是选择加上，但把这三个从依赖项中移除，通过跟 useRef 和 useEffect 配合，来进行优化：
+
+```tsx handlers="mark"
+const [isOpen, setIsOpen] = React.useState(false)
+const toggleIsOpen = () => setIsOpen((_) => !_)
+// !mark
+const isOpenRef = React.useRef(isOpen)
+// !mark(1:3) gold
+React.useEffect(() => {
+  isOpenRef.current = isOpen
+}, [isOpen])
+```
+
+创建一个 isOpenRef，用 useEffect 监听 isOpen 状态的变化，变化时，改变 isOpenRef.current 的值。
+
+这样每次 isOpen 更新时，都会触发这里的 effect 去更新它的 ref，然后在 handleKeyDown 里去访问它的 ref：
+
+```tsx handlers="mark"
+if (ARROW_KEYS.includes(event.code)) {
+  //
+} else if (CONFIRM_KEYS.includes(event.code)) {
+  event.preventDefault()
+  // !mark
+  if (!isOpenRef.current) {
+    setIsOpen(true)
+    return
+  }
+  //
+} else if (CLOSE_KEYS.includes(event.code)) {
+  //
+}
+```
+
+ref 是不受组件闭包限制的，只要访问它，随时都可以得到最新值。
+
+这样依赖，就避免了因 isOpen 改变，而让 useCallback 返回新的引用的情况。
+
+同样的，也对 hoveredIndex 和 filteredOptions 做同样的处理：
+
+```tsx handlers="mark"
+const [hoveredIndex, setHoveredIndex] = React.useState<number | null>(null)
+// !mark
+const hoveredIndexRef = React.useRef(hoveredIndex)
+// !mark(1:3) gold
+React.useEffect(() => {
+  hoveredIndexRef.current = hoveredIndex
+}, [hoveredIndex])
+
+const filteredOptions = options.filter(/* */)
+// !mark
+const filteredOptionsRef = React.useRef(filteredOptions)
+// !mark(1:3) gold
+React.useEffect(() => {
+  filteredOptionsRef.current = filteredOptions
+}, [filteredOptions])
+```
+
+还有 handleKeyDown 中对应的部分，hoveredIndex 和 filteredOptions 各 4 处：
+
+```tsx handlers="mark" showCopyButton
+const handleKeyDown = () => {
+  const optionsNode = optionsRef.current
+  if (!optionsNode) return
+
+  if (ARROW_KEYS.includes(event.code)) {
+    event.preventDefault()
+    // !mark[/hoveredIndexRef\.current/] gold
+    if (hoveredIndexRef.current === null) {
+      if (ARROW_UP_KEYS.includes(event.code)) {
+        // !mark[/filteredOptionsRef\.current/]
+        setHoveredIndex(filteredOptionsRef.current.length - 1)
+        optionsNode.scrollTop = optionsNode.scrollHeight
+      } else {
+        setHoveredIndex(0)
+        optionsNode.scrollTop = 0
+      }
+    } else {
+      // !mark[/hoveredIndexRef\.current/] gold
+      let nextHoveredIndex = hoveredIndexRef.current
+      if (ARROW_UP_KEYS.includes(event.code)) {
+        nextHoveredIndex -= 1
+      } else {
+        nextHoveredIndex += 1
+      }
+      if (nextHoveredIndex < 0)
+        // !mark[/filteredOptionsRef\.current/]
+        nextHoveredIndex = filteredOptionsRef.current.length - 1
+      // !mark[/filteredOptionsRef\.current/]
+      if (nextHoveredIndex > filteredOptionsRef.current.length - 1)
+        nextHoveredIndex = 0
+      setHoveredIndex(nextHoveredIndex)
+      const nextHoveredOption = optionsNode.querySelector(
+        `li:nth-of-type(${nextHoveredIndex + 1})`,
+      )
+      if (!nextHoveredOption) return
+      nextHoveredOption.scrollIntoView({ block: "nearest" })
+    }
+  } else if (CONFIRM_KEYS.includes(event.code)) {
+    event.preventDefault()
+    if (!isOpen) {
+      setIsOpen(true)
+      return
+    }
+    // !mark[/hoveredIndexRef\.current/] gold
+    if (hoveredIndexRef.current === null) return
+    // !mark[/filteredOptionsRef\.current/]
+    // !mark[/hoveredIndexRef\.current/] gold
+    const label = filteredOptionsRef.current.at(hoveredIndexRef.current)
+    if (!label) return
+    onSelectOption(label)
+    setIsOpen(false)
+  } else if (CLOSE_KEYS.includes(event.code)) {
+    setIsOpen(false)
+  }
+}
+```
+
+这里的输入框，是通过 onKeyDown 来添加键盘事件的，React 会通过事件代理，把事件添加到最根部的元素上。
+
+就算是 useCallback 每次更新返回新的引用，成本几乎只是一次属性赋值，可以忽略不记，在这里只是作为例子，来引出使用 useRef 和 useEffect 进行优化。
+
+### useEffectEvent 优化
+
+如果你觉得这种方式即要写 useRef 又要写 useEffect，还要替换变量太麻烦，可以使用 React 在 19.2 版本中加入的 useEffectEvent。
+
+useEffectEvent 接收一个函数作为参数，返回一个函数，该函数只能在 effect 中调用。
+
+```tsx
+const handleKeyDown = React.useEffectEvent((event: KeyboardEvent) => {
+  // 函数中的状态的写法为 isOpen、filteredOptions 和 hoveredIndex
+  // 而非 isOpenRef.current 等 ref 的版本
+})
+```
+
+这个 hook 专门用于解决**想读取最新状态、但又不想因为该状态改变而重新运行整个 Effect 中的代码**的这种情况。
+
+所以我们需要在 useEffect 中给输入框添加 keydown 事件：
+
+```tsx handlers="mark"
+const inputRef = React.useRef<HTMLInputElement>(null)
+
+React.useEffect(() => {
+  const inputNode = inputRef.current
+  if (!inputNode) return
+
+  inputNode.addEventListener("keydown", handleKeyDown)
+
+  return () => {
+    inputNode.removeEventListener("keydown", handleKeyDown)
+  }
+  // !mark[/\[\]/]
+}, [])
+```
+
+在 useEffect 中，虽然使用了外部函数 handleKeyDown，按理说应该添加到依赖数组中，但由于其使用了 useEffectEvent，可以读取到最新状态，故可以不添加。

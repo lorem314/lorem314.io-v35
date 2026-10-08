@@ -1,0 +1,216 @@
+---
+slug: "codehike-annotation-render-test"
+title: "Code Hike Annotation 渲染测试"
+tags:
+  - "Code Hike"
+createdAt: 2026-07-12T08:00:00+08:00
+description: "Code Hike Annotation 测试"
+cover: "/image/blog/codehike-annotation-render-test.webp"
+---
+
+## Code Hike Annotation
+
+自定义 Code Hike Annotation 的用法。
+
+为了不被识别成 Annotation 注释，以下所有**在 MDX 文件中的使用示例**代码块中的 Annotation 注释均使用了**零宽空格**。
+
+若页面中的代码块过多，且无论代码块中有无使用，都在 Pre 中添加了所有的 Annotation 的话，可能会导致内存不够，页面崩溃，故在 meta 中使用 `handlers=""` 来动态加载代码块中使用的 Annotation。
+
+### copy button
+
+{/* prettier-ignore-start */}
+````markdown handlers="mark" title="在 MDX 文件中的使用示例"
+<!-- !mark[/showCopyButton/]  -->
+```js showCopyButton
+function lorem(ipsum, dolor = 1) {
+  const sit = ipsum == null ? 0 : 1
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+```
+````
+{/* prettier-ignore-end */}
+
+通过在 meta 中添加 showCopyButton 显示复制代码按钮：
+
+```js showCopyButton
+function lorem(ipsum, dolor = 1) {
+  const sit = ipsum == null ? 0 : ipsum.sit
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+```
+
+### line-number
+
+{/* prettier-ignore-start */}
+````markdown handlers="mark" title="在 MDX 文件中的使用示例"
+<!-- !mark[/showLineNumbers/]  -->
+```js showLineNumbers
+function lorem(ipsum, dolor = 1) {
+  const sit = ipsum == null ? 0 : 1
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+```
+````
+{/* prettier-ignore-end */}
+
+通过在 meta 中添加 showLineNumbers 显示代码行数：
+
+```js showLineNumbers
+function lorem(ipsum, dolor = 1) {
+  const sit = ipsum == null ? 0 : 1
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+```
+
+### callout
+
+{/* prettier-ignore-start */}
+````markdown handlers="callout mark className" title="在 MDX 文件中的使用示例"
+<!-- !mark[/handlers="callout"/] green -->
+```js handlers="callout"
+const lorem = ipsum(dolor, sit)
+// !mark
+// !className select-none
+// !​callout[/amet/] This is a callout 
+const [amet, consectetur] = [0, 0]
+lorem.adipiscing((sed, elit) => {
+  if (sed) {
+    amet += elit
+  }
+})
+```
+````
+{/* prettier-ignore-end */}
+
+展示 Callout 提示框。
+
+```js handlers="callout"
+const lorem = ipsum(dolor, sit)
+// !callout[/amet/] This is a callout
+const [amet, consectetur] = [0, 0]
+lorem.adipiscing((sed, elit) => {
+  if (sed) {
+    amet += elit
+  }
+})
+```
+
+### mark
+
+{/* prettier-ignore-start */}
+````markdown handlers="mark className" title="在 MDX 文件中的使用示例"
+<!-- !mark[/handlers="mark"/] green -->
+```js handlers="mark"
+function lorem(ipsum, dolor = 1) {
+  // !mark
+  // !className select-none
+  // !​mark
+  return dolor
+}
+
+function ipsum(lorem, dolor = 1) {
+  // !mark
+  // !className select-none
+  // !​mark(1:2) gold
+  const sit = lorem == null ? 0 : lorem.sit
+  dolor = sit - amet(dolor)
+  // !mark
+  // !className select-none
+  // !​mark[/sit/] green
+  return sit ? consectetur(lorem) : []
+}
+```
+````
+{/* prettier-ignore-end */}
+
+`mark` 默认使用蓝色，标记注释行下面的一行，可通过在圆括号中添加指定的行或行范围添加多个标记，也可使用方括号中的**正则表达式**来只标记行内的部分字符串，后接颜色名称或颜色表达式修改标记的颜色。
+
+- `!mark(1,3)`：标记注释行以下的 1 和 3 行
+- `!mark(1:2) gold`：标记注释行以下的 1 至 2 行
+- `!mark[/sit/] pink`：标记注释行下一行中匹配的字符串
+- `!mark[/sit/] rgb(12,34,56)`：用自定义颜色 `rgb(12,34,56)` 进行标记
+
+```js handlers="mark"
+function lorem(ipsum, dolor = 1) {
+  // !mark
+  return dolor
+}
+
+function ipsum(lorem, dolor = 1) {
+  // !mark(1:2) gold
+  const sit = lorem == null ? 0 : lorem.sit
+  dolor = sit - amet(dolor)
+  // !mark[/sit/] green
+  return sit ? consectetur(lorem) : []
+}
+```
+
+### diff
+
+使用 diff 时，需要将 mark 也作为 handlers 添加，且顺序不能颠倒。
+
+{/* prettier-ignore-start */}
+````markdown handlers="mark className" title="在 MDX 文件中的使用示例"
+<!-- !mark[/handlers="mark diff"/] green -->
+```js handlers="mark diff"
+function lorem(ipsum, dolor = 1) {
+  const sit = ipsum == null ? 0 : ipsum.sit
+  // !mark
+  // !className select-none
+  // !​diff -
+  dolor = ipsum - sit
+  // !mark
+  // !className select-none
+  // !​diff +
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+```
+````
+{/* prettier-ignore-end */}
+
+`diff -` 的行不会通过复制代码按钮添加到剪贴板中，也不会被鼠标选中。
+
+```js handlers="mark diff" showCopyButton
+function lorem(ipsum, dolor = 1) {
+  const sit = ipsum == null ? 0 : ipsum.sit
+  // !diff -
+  dolor = ipsum - sit
+  // !diff +
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+```
+
+### link
+
+给特定字符串添加链接：
+
+{/* prettier-ignore-start */}
+````markdown handlers="mark className"
+<!-- !mark[/handlers="link"/] green -->
+```js handlers="link"
+function lorem(ipsum, dolor = 1) {
+  const sit = ipsum == null ? 0 : ipsum.sit
+  dolor = sit - amet(dolor)
+  // !mark
+  // !className select-none
+  // !​link[/ipsum/] https://example.com
+  return sit ? consectetur(ipsum) : []
+}
+```
+````
+{/* prettier-ignore-end */}
+
+```js handlers="link"
+function lorem(ipsum, dolor = 1) {
+  const sit = ipsum == null ? 0 : ipsum.sit
+  dolor = sit - amet(dolor)
+  // !link[/ipsum/] https://example.com
+  return sit ? consectetur(ipsum) : []
+}
+```

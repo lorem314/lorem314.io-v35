@@ -1,0 +1,134 @@
+---
+slug: "codehike-callout-position-test"
+title: "Code Hike Callout 位置测试"
+tags:
+  - "Code Hike"
+createdAt: 2026-07-12T08:00:00+08:00
+description: "Code Hike Callout Annotation 测试"
+cover: "/image/blog/codehike-annotation-render-test.webp"
+---
+
+## 不显示行号
+
+```js handlers="callout"
+function lorem(ipsum, dolor = 1) {
+  // !callout[/ipsum/] This is a ipsum callout
+  const sit = ipsum == null ? 0 : 1
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+```
+
+### 有 mark
+
+```js handlers="callout mark"
+function lorem(ipsum, dolor = 1) {
+  // !callout[/ipsum/] This is a ipsum callout
+  const sit = ipsum == null ? 0 : 1
+  // !mark
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+```
+
+#### 有 diff
+
+```js handlers="callout mark diff"
+function lorem(ipsum, dolor = 1) {
+  // !callout[/ipsum/] This is a ipsum callout
+  const sit = ipsum == null ? 0 : 1
+  // !diff -
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+```
+
+## 显示行号
+
+### 行总数长度为 1
+
+```js showLineNumbers handlers="callout"
+function lorem(ipsum, dolor = 1) {
+  // !callout[/ipsum/] This is a ipsum callout
+  const sit = ipsum == null ? 0 : 1
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+```
+
+#### 有 mark
+
+```js showLineNumbers handlers="callout mark"
+function lorem(ipsum, dolor = 1) {
+  // !callout[/ipsum/] This is a ipsum callout
+  const sit = ipsum == null ? 0 : 1
+  // !mark
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+```
+
+##### 有 diff
+
+```js showLineNumbers handlers="callout mark diff"
+function lorem(ipsum, dolor = 1) {
+  // !callout[/ipsum/] This is a ipsum callout
+  const sit = ipsum == null ? 0 : 1
+  // !diff -
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+```
+
+### 行总数长度为 2
+
+```js showLineNumbers handlers="callout"
+function lorem(ipsum, dolor = 1) {
+  // !callout[/ipsum/] This is a ipsum callout
+  const sit = ipsum == null ? 0 : 1
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+
+function lorem(ipsum, dolor = 1) {
+  const sit = ipsum == null ? 0 : 1
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+```
+
+#### 有 mark
+
+```js showLineNumbers handlers="callout mark"
+function lorem(ipsum, dolor = 1) {
+  // !callout[/ipsum/] This is a ipsum callout
+  const sit = ipsum == null ? 0 : 1
+  // !mark
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+
+function lorem(ipsum, dolor = 1) {
+  const sit = ipsum == null ? 0 : 1
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+```
+
+##### 有 diff
+
+```js showLineNumbers handlers="callout mark diff"
+function lorem(ipsum, dolor = 1) {
+  // !callout[/ipsum/] This is a ipsum callout
+  const sit = ipsum == null ? 0 : 1
+  // !diff -
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+
+function lorem(ipsum, dolor = 1) {
+  const sit = ipsum == null ? 0 : 1
+  dolor = sit - amet(dolor)
+  return sit ? consectetur(ipsum) : []
+}
+```

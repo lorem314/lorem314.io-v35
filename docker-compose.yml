@@ -1,0 +1,30 @@
+services:
+
+  es01:
+    image: elasticsearch:8.19.8
+    pull_policy: never
+    container_name: es01
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - "ES_JAVA_OPTS=-Xms768m -Xmx768m -XX:MaxDirectMemorySize=256m -XX:+UseG1GC -XX:G1HeapRegionSize=4m"
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+      - /usr/share/elasticsearch/plugins/elasticsearch-analysis-ik-8.19.8:/usr/share/elasticsearch/plugins/analysis-ik:ro
+    ports:
+      - "127.0.0.1:9200:9200"
+    networks:
+      - elastic
+
+volumes:
+  esdata:
+
+networks:
+  elastic:

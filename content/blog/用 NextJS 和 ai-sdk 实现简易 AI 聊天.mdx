@@ -1,0 +1,625 @@
+---
+slug: "building-simple-ai-chat-with-nextjs-and-ai-sdk"
+title: "用 NextJS 和 ai-sdk 实现简易 AI 聊天"
+tags:
+  - "NextJS"
+  - "@shadcn/ui"
+  - "AI"
+createdAt: 2026-08-23T08:00:00+08:00
+description: "本文介绍了如何使用 shadcn 中的组件和 ai-sdk 相关的库，在 NextJS 中实现简易 AI 聊天功能。包括开启深度思考模式、上传图片让 AI 分析以及让 AI 生成图片等功能。"
+cover: "/image/blog/building-simple-ai-chat-with-nextjs-and-ai-sdk.webp"
+bvid: "BV1SDhP6kE81"
+---
+
+## 说明
+
+### 项目依赖
+
+该项目使用 NextJS 构建，需要安装的依赖如下：
+
+<NpmTabs>
+
+```shell !!tabs pnpm
+pnpm add @ai-sdk/openai-compatible @ai-sdk/react ai react-markdown zod
+```
+
+```shell !!tabs npm
+npm install @ai-sdk/openai-compatible @ai-sdk/react ai react-markdown zod
+```
+
+```shell !!tabs yarn
+yarn add @ai-sdk/openai-compatible @ai-sdk/react ai react-markdown zod
+```
+
+```shell !!tabs bun
+bun add @ai-sdk/openai-compatible @ai-sdk/react ai react-markdown zod
+```
+
+</NpmTabs>
+
+### 模型
+
+模型使用的是阿里云百炼中有免费额度的模型，需要申请一个 API Key，和业务空间 ID 一起放入项目中的 `.env` 文件中：
+
+```text
+API_KEY=""
+WORKSPACE_ID=""
+```
+
+## AI 聊天和深度思考
+
+### 前端 hook 调用
+
+从 `@ai-sdk/react` 中导入 useChat：
+
+```tsx
+import { useChat } from "@ai-sdk/react"
+
+export default function Page() {
+  const { messages, status, sendMessage } = useChat()
+
+  return // ...
+}
+```
+
+这个 hook 封装了用于管理流式 ai 聊天的大部分的功能，我们主要用它返回的 `messages`、`status` 和 `sendMessage` 这三个：
+
+- messages 是聊天的消息，包括用户输入的和 ai 返回的
+- status 是 当前 聊天 交互 的状态
+  - submitted 是提交了新消息，但后端还没有返回响应
+  - streaming 是后端正在向前端传输 ai 生成的文本流
+  - ready 是就绪状态，随时可以向 ai 发送消息，开启开始新一轮对话
+  - error 是报错
+- sendMessage 调用它之后，会触发一次 ai 聊天的循环周期。包括，先向后端发送请求，然后等待 后端 的响应，最后再流式传输到前端等过程
+
+useChat 中可以传入参数 `transport`，值为 DefaultChatTransport 的实例，再通过 api 属性来设定向哪个后端地址发送请求，不写的话默认是向 `/api/chat` 地址发送。
+
+```tsx
+import { DefaultChatTransport } from "ai"
+
+export default function Page() {
+  const { messages, status, sendMessage } = useChat({
+    transport: new DefaultChatTransport({
+      api: "/api/chat",
+    }),
+  })
+
+  return // ...
+}
+```
+
+在 handleSubmit 中，调用 sendMessage：
+
+- 第一个参数对象中的 text 上，传入用户输入的消息 trimmedMessageText
+- 第二个参数对象中的 body 上，传入带有 isDeepThink 的对象
+
+输入消息，点击发送按钮之后，当前输入的对话文本会和之前的对话历史，合并成一个数组 messages，跟 isDeepThink 一起，通过 POST 方法，被发送到后端的 /api/chat 接口上。
+
+### 后端处理请求
+
+在 app 文件夹中创建 `/api/chat/route.ts` 文件，并定义处理 POST 方法的函数：
+
+```ts
+export async function POST(req: Request) {}
+```
+
+前端的 useChat 发送请求后，就会触发这个函数，我们要在这里，通过的定义好的 AI 供应商，来调用模型，再通过流式传输，把响应返回给前端。
+
+#### 定义供应商
+
+在 lib 文件夹中，创建 `ai.ts`，导入 `createOpenAICompatible`：
+
+```ts
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
+
+const API_KEY = process.env.API_KEY
+const WORKSPACE_ID = process.env.WORKSPACE_ID
+
+const provider = createOpenAICompatible({
+  apiKey: API_KEY,
+  baseURL: `https://${WORKSPACE_ID}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`,
+  name: "dashscope",
+})
+
+export const languageModel = provider("qwen3.7-plus")
+```
+
+这个函数用于定义模型的供应商(provider)，需要提供 API Key 和 模型的访问地址。其中的 name 为自定义名称，之后会用同样的名称来添加调用模型时的参数。
+
+调用 provider 并传入使用的模型的名称，再导出。
+
+#### 返回响应
+
+回到 `route.ts`，导入 languageModel、ai 库中的几个函数，获取前端传过来的数据，并调用 streamText：
+
+```ts
+import {
+  streamText,
+  convertToModelMessages,
+  createUIMessageStreamResponse,
+  toUIMessageStream,
+  tool,
+} from "ai"
+
+import { languageModel } from "@/lib/ai"
+
+export async function POST(req: Request) {
+  const { messages, isDeepThink } = await req.json()
+
+  const result = streamText({
+    model: languageModel,
+    messages: await convertToModelMessages(messages),
+    providerOptions: {
+      dashscope: {
+        enable_thinking: isDeepThink,
+        reasoning_effort: isDeepThink ? "xhigh" : "low",
+      },
+    },
+  })
+
+  return createUIMessageStreamResponse({
+    stream: toUIMessageStream({ stream: result.stream }),
+  })
+}
+```
+
+- 在 streamText 参数对象中的 model 上，传入 languageModel
+- 还有消息数组 messages，该数组的类型是 `ModelMessage[]` 类型，需要用 `convertToModelMessages` 把前端传过来的 messages 转换一下再传入
+- 通过 providerOptions 传入供应商规定的参数，这里的 dashscope 就是之前调用 createOpenAICompatible 时 name 属性的值，两者要相同。阿里云百炼中提供了以下参数：
+  - `enable_thinking: boolean` 控制模型是否开启思考能力
+  - `reasoning_effort: string` 控制模型的思考力度，可以是 `xhigh`、`medium` 或 `low`
+
+POST 函数需要返回响应，调用并返回 `createUIMessageStreamResponse`，该函数能帮我们返回流式响应。
+
+把 streamText 返回 result 中的 stream，先经过 `toUIMessageStream` 转换，再传入 createUIMessageStreamResponse 中的 stream。
+
+这样，这个后端就可以接收请求、调用模型、并返回响应了。
+
+### 前端消息渲染
+
+我们使用 @shadcn/ui 中的 [Message Scroller](https://ui.shadcn.com/docs/components/base/message-scroller) 来渲染消息数组。
+
+```tsx
+export default function Page() {
+  // ...
+
+  const isSubmitted = status === "submitted"
+
+  return (
+    <MessageScrollerProvider autoScroll>
+      <Card className="mx-auto my-8 h-full w-full max-w-3xl">
+        <CardContent className="flex grow overflow-hidden">
+          <MessageScroller>
+            <MessageScrollerViewport className="no-scrollbar">
+              <MessageScrollerContent>
+                {messages.map((message) => (
+                  <MessageScrollerItem
+                    key={message.id}
+                    messageId={message.id}
+                    scrollAnchor={message.role === "user"}
+                  >
+                    <ChatMessage message={message} />
+                  </MessageScrollerItem>
+                ))}
+
+                {isSubmitted ? (
+                  <Marker role="status">
+                    <MarkerIcon>
+                      <Spinner />
+                    </MarkerIcon>
+                    <MarkerContent className="shimmer">
+                      AI 正在处理...
+                    </MarkerContent>
+                  </Marker>
+                ) : null}
+              </MessageScrollerContent>
+            </MessageScrollerViewport>
+            <MessageScrollerButton />
+          </MessageScroller>
+        </CardContent>
+
+        {/* CardFooter */}
+      </Card>
+    </MessageScrollerProvider>
+  )
+}
+```
+
+把 Provider 放到最外层，其中的 [autoScroll](https://ui.shadcn.com/docs/react/message-scroller#messagescrollerprovider) 默认是 false，将其设置成 true，让滚动条自动跟随流式传输的新内容。
+
+计算出 `isSubmitted`，并在该状态时渲染一个 Marker。
+
+自定义 ChatMessage 来单独处理每一个消息：
+
+```tsx
+const ChatMessage = ({ message }: { message: UIMessage }) => {
+  const isUser = message.role === "user"
+
+  return (
+    <Message align={isUser ? "end" : "start"}>
+      <MessageContent></MessageContent>
+    </Message>
+  )
+}
+```
+
+计算出该消息是否为用户发送 `isUser`，并返回 [Message](https://ui.shadcn.com/docs/components/base/message) 组件，通过 align 设置消息靠左还是靠右显示。
+
+message 中有 4 个属性：
+
+- `id`：唯一标识。
+- `role`：消息的来源，有 `user`、`assistant` 和 `system` 三种情况
+  - `user`：用户发送的消息。
+  - `assistant`：模型返回的消息。
+  - `system`：一般用于显示给 AI 添加的人设或者规则。比如 “你是一个乐于助人的助手” 或 “你是一个猫娘” 之类的，这种即不属于用户也不属于模型的消息，这里我们没有用到。
+- `metadata`：消息的元数据。可以在后端添加，如发送的时间、来自哪个用户 ID、属于哪个会话 ID 等。由于这里没涉及到用户，所以没有用到。
+- `parts`：消息的组成数组。其中的每个元素都有 type 属性，用于判断消息的每个组成的类型，如 `text` 普通文本，`reasoning` 思考过程、`file` 文件或 `tool-*` 工具调用等。
+
+我们需要收集不同类型的 part 去渲染。
+
+#### 渲染普通文本消息
+
+通过 filter 筛选出 `text` 类型的普通文本，**用户输入的消息**和 **AI 返回的正式回答**都属于这一类：
+
+```tsx
+const ChatMessage = ({ message }: { message: UIMessage }) => {
+  const text = message.parts
+    .filter((p) => p.type === "text")
+    .map((p) => p.text)
+    .join("")
+
+  return (
+    <Message align={isUser ? "end" : "start"}>
+      <MessageContent>
+        {text ? (
+          isUser ? (
+            <Bubble>
+              <BubbleContent>{text}</BubbleContent>
+            </Bubble>
+          ) : (
+            <Bubble variant={"secondary"}>
+              <BubbleContent className="prose dark:prose-invert">
+                <ReactMarkdown>{text}</ReactMarkdown>
+              </BubbleContent>
+            </Bubble>
+          )
+        ) : null}
+      </MessageContent>
+    </Message>
+  )
+}
+```
+
+之后再通过 map 和 join 获取完整的字符串。
+
+- 如果是用户发送的，就渲染 Bubble 组件，并把文本放到 BubbleContent 中
+- 如果是 AI 返回的，则用 ReactMarkdown 渲染文本。模型生成的回答，一般都是 markdown 格式的字符串，再用 tailwind-typography 中的 prose 去美化样式。
+
+#### 渲染思考过程消息
+
+筛选出 `reasoning` 类型的思考过程：
+
+```tsx
+const ChatMessage = ({ message }: { message: UIMessage }) => {
+  const reasoningParts = message.parts.filter((p) => p.type === "reasoning")
+  const isReasoningStreaming = reasoningParts.some(
+    (p) => p.state === "streaming",
+  )
+  const reasoningText = reasoningParts.map((p) => p.text).join("")
+
+  // text
+
+  return (
+    <Message align={isUser ? "end" : "start"}>
+      <MessageContent>
+        {reasoningText ? (
+          <Collapsible>
+            <CollapsibleTrigger
+              render={
+                <Button variant={"ghost"}>
+                  <ChevronsUpDownIcon />
+                  {isReasoningStreaming ? (
+                    <span>正在思考...</span>
+                  ) : (
+                    <span>思考过程</span>
+                  )}
+                </Button>
+              }
+            />
+            <CollapsibleContent className="prose dark:prose-invert">
+              <ReactMarkdown>{reasoningText}</ReactMarkdown>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : null}
+
+        {/* text */}
+      </MessageContent>
+    </Message>
+  )
+}
+```
+
+通过 part 中的 state 属性判断，计算出是否有 part 处于 streaming 状态 `isReasoningStreaming`。
+
+在 CollapsibleTrigger 上通过 render 渲染为 Button：
+
+- 如果正在流式传输文本，显示 `正在思考...`
+- 如果传输完毕，显示 `思考过程`
+
+思考过程也是 markdown 格式的字符串，也需要用 ReactMarkdown 去渲染。
+
+## AI 分析图片
+
+在 InputGroup 最开头，添加上传图片的组件：
+
+```tsx
+export default function Page() {
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
+  const [image, setImage] = React.useState<File | null>(null)
+
+  const handleChangeImage = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files
+    if (!files) return
+    setImage(files[0])
+  }
+
+  return (
+    <MessageScrollerProvider autoScroll>
+      <Card className="mx-auto my-8 h-full w-full max-w-3xl">
+        {/* CardContent */}
+
+        <CardFooter className="bg-background shrink-0">
+          <form className="w-full" onSubmit={handleSubmit}>
+            <InputGroup>
+              <InputGroupAddon align={"block-start"}>
+                <Button
+                  variant={"outline"}
+                  size={"icon"}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <PaperclipIcon />
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  onChange={handleChangeImage}
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                />
+              </InputGroupAddon>
+
+              {/* InputGroupTextarea */}
+
+              {/* InputGroupAddon */}
+            </InputGroup>
+          </form>
+        </CardFooter>
+      </Card>
+    </MessageScrollerProvider>
+  )
+}
+```
+
+给 `input:file` 创建 ref，用 image 状态保存用户上传图片。
+
+通过按钮的点击事件，触发 input 上的点击事件，让浏览器打开资源管理器。
+
+并且在有图片时，通过 [Attachment](https://ui.shadcn.com/docs/components/base/attachment) 显示图片：
+
+```tsx
+<InputGroupAddon align={"block-start"}>
+  {/* Button */}
+  {/* input:file */}
+  {image ? (
+    <Attachment>
+      <AttachmentMedia variant={"image"}>
+        <img src={URL.createObjectURL(image)} alt={image.name} />
+      </AttachmentMedia>
+      <AttachmentContent>
+        <AttachmentTitle>{image.name}</AttachmentTitle>
+        <AttachmentDescription>
+          {image.type} - {(image.size / 1024).toPrecision(2)} KB
+        </AttachmentDescription>
+      </AttachmentContent>
+      <AttachmentActions>
+        <AttachmentAction onClick={() => setImage(null)}>
+          <XIcon />
+        </AttachmentAction>
+      </AttachmentActions>
+    </Attachment>
+  ) : null}
+</InputGroupAddon>
+```
+
+在 AttachmentMedia 中显示图片，通过 `URL.createObjectURL` 创建临时链接。
+
+在 handleSubmit 中，添加图片：
+
+```ts
+const handleSubmit = (event: React.SubmitEvent<HTMLFormElement>) => {
+  // ...
+
+  const dt = new DataTransfer()
+  if (image) dt.items.add(image)
+
+  sendMessage(
+    {
+      text: trimmedMessageText,
+      files: dt.items.length !== 0 ? dt.files : undefined,
+    },
+    { body: { isDeepThink } },
+  )
+
+  messageNode.value = ""
+  setImage(null)
+}
+```
+
+sendMessage 的第一个参数对象中的 files 是 FileList 类型，用 DataTransfer 做类型转换，并在发送成功后将 image 重置为 null。
+
+### 渲染上传文件消息
+
+筛选 file 类型的文件消息 `imageFileParts` 并遍历渲染：
+
+```tsx
+const ChatMessage = ({ message }: { message: UIMessage }) => {
+  // reasoning
+
+  const imageFileParts = message.parts.filter((p) => p.type === "file")
+
+  // text
+
+  return (
+    <Message align={isUser ? "end" : "start"}>
+      <MessageContent>
+        {/* reasoningText*/}
+
+        {isUser
+          ? imageFileParts.map((p, index) => {
+              return (
+                <Bubble key={index}>
+                  <BubbleContent>
+                    <img src={p.url} alt={p.filename} />
+                  </BubbleContent>
+                </Bubble>
+              )
+            })
+          : null}
+
+        {/* text */}
+      </MessageContent>
+    </Message>
+  )
+}
+```
+
+## AI 生成图片
+
+在后端通过 fetch 调用 HTTP 接口来获取响应。
+
+### 定义工具
+
+让 AI 生成图片，属于工具调用，在 streamText 中添加 tools，这里用于定义 AI 可以使用的工具：
+
+```ts
+const result = streamText({
+  // model
+  // messages
+  // providerOptions
+  tools: {
+    generateImage: tool({
+      description: "根据描述生成图片",
+      inputSchema: z.object({ prompt: z.string() }),
+      execute: async ({ prompt }) => {
+        // fetch
+      },
+    }),
+  },
+})
+```
+
+在其中定义 generateImage，值为调用 tool 函数的返回值。
+
+这里 generateImage 的名称可以自定义，可以叫 createImage 或者就叫 image，模型是否使用该工具，和 tool 中的 description 属性有关，我们想让模型根据文字生成图片，则可以写成**根据描述生成图片**。
+
+如果用户输入的消息中，有生成图片的意图，模型就会调用其中的 execute 函数。
+
+该函数的参数可以通过 inputSchema 来定义，使用 zod 定义一个有 prompt 字符串类型属性的对象。该 prompt 不是用户输入的消息，而是 AI 根据消息，自动生成的提示词。
+
+在 execute 中调用 fetch：
+
+```ts
+const res = await fetch(
+  `https://${WORKSPACE_ID}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`,
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "qwen-image-2.0",
+      input: {
+        messages: [{ role: "user", content: [{ text: prompt }] }],
+      },
+    }),
+  },
+)
+
+if (!res.ok) throw Error("api error")
+
+const data = await res.json()
+const url = data.output?.choices?.[0]?.message?.content?.[0]?.image
+
+if (!url) throw Error("no url")
+
+return { url, prompt }
+```
+
+注意 body 中的 input 需要和 API 文档中提供的结构一致，检查响应和数据均没有问题后，返回生成的图片的地址和提示词。
+
+### 渲染生成图片消息
+
+筛选类型为 tool-generateImage 的生成图片消息，其中 tool- 后面的字符串要和 streamText 中的 tools 中定义的工具名称一致：
+
+```tsx
+const ChatMessage = ({ message }: { message: UIMessage }) => {
+  // reasoningText
+  // imageFileParts
+
+  const generateImageParts = message.parts.filter(
+    (p) => p.type === "tool-generateImage",
+  )
+
+  // text
+
+  return (
+    <Message align={isUser ? "end" : "start"}>
+      <MessageContent>
+        {/* reasoningText */}
+
+        {generateImageParts.map((p) => {
+          if (p.type !== "tool-generateImage") return null
+          switch (p.state) {
+            case "input-available":
+              return (
+                <Marker role="status" key={p.toolCallId}>
+                  <MarkerIcon>
+                    <Spinner />
+                  </MarkerIcon>
+                  <MarkerContent className="shimmer">
+                    正在生成图片...
+                  </MarkerContent>
+                </Marker>
+              )
+            case "output-available":
+              const output = p.output as { url: string; prompt: string }
+              return (
+                <BubbleGroup key={p.toolCallId}>
+                  <Bubble variant={"secondary"}>
+                    <BubbleContent>
+                      <img src={output.url} alt={output.prompt} />
+                    </BubbleContent>
+                  </Bubble>
+                  <Bubble variant={"secondary"}>
+                    <BubbleContent>{output.prompt}</BubbleContent>
+                  </Bubble>
+                </BubbleGroup>
+              )
+            default:
+              return null
+          }
+        })}
+
+        {/* imageFileParts */}
+        {/* text */}
+      </MessageContent>
+    </Message>
+  )
+}
+```
+
+遍历渲染时，用 switch 根据 p.state 渲染不同的 UI。
+
+- `input-available`：参数生成完毕，正在准备执行工具。渲染 Marker，提示用户正在生成图片
+- `output-available`：工具调用完毕。先提取后端返回的数据 output，在分别用 Bubble 渲染图片和提示词

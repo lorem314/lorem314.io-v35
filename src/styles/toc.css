@@ -1,0 +1,27 @@
+ul[data-slot="tree-list"] > li {
+  @apply relative ml-3.5 pl-3.5 leading-7;
+  @apply border-l-muted border-l;
+}
+
+ul[data-slot="tree-list"] > li::before {
+  @apply absolute top-0 left-0 h-3.5 w-2.5 content-['_'];
+  @apply border-b-muted border-b;
+}
+
+ul[data-slot="tree-list"] > li:last-child {
+  @apply border-l-transparent;
+}
+
+ul[data-slot="tree-list"] > li:last-child::before {
+  @apply -left-px;
+  @apply border-l-muted border-l;
+}
+
+details > summary > [data-slot="details-header"]::before {
+  @apply absolute top-7 -left-3.5 h-[calc(100%-1.75rem)] content-['_'];
+  @apply border-l-accent border-l;
+}
+
+details:not([open]) > summary > [data-slot="details-header"]::before {
+  @apply border-l-transparent;
+}

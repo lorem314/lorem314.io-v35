@@ -1,0 +1,28 @@
+/* 无引号 无斜体的 blockquote */
+.prose blockquote {
+  font-style: normal !important;
+  quotes: none !important;
+  padding: 1rem 0 1rem 1.5rem;
+  font-weight: normal;
+}
+.prose blockquote *:first-child {
+  margin-top: 0;
+}
+.prose blockquote *:last-child {
+  margin-bottom: 0;
+}
+
+/* Sandpack CodeEditor lineNumbers */
+.sp-editor .cm-editor .cm-line {
+  @apply font-fira leading-6;
+}
+.cm-lineNumbers .cm-gutterElement {
+  @apply text-sm;
+  @apply flex items-center justify-end;
+  @apply mr-2;
+}
+
+/* katex */
+.prose .katex-display {
+  @apply my-10 block;
+}
